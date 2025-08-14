@@ -293,7 +293,7 @@ def apply_config(config):
         conn = TelnetClient(
             config.get('Host', 'host', fallback='192.168.1.200'),
             int(config.get('Host', 'port', fallback=23)),
-            int(config.get('Host', 'timetout', fallback=10)),
+            int(config.get('Host', 'timeout', fallback=10)),
         )
         conn.connect()
     else:
