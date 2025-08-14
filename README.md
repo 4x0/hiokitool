@@ -467,5 +467,6 @@ This is an unofficial tool and is not affiliated with, endorsed by, or supported
 ## See Also
 
 - [HIOKI Official Website](https://www.hioki.com)
-- [SCPI Standard Documentation](https://www.ivifoundation.org/docs/scpi-99.pdf)
+- [IVI Foundation SCPI Specifications](https://www.ivifoundation.org/specifications/default.html)
+- [SCPI Wikipedia Reference](https://en.wikipedia.org/wiki/Standard_Commands_for_Programmable_Instruments)
 - [HIOKI DMM Programming Manuals](https://www.hioki.com/en/support/download/)
