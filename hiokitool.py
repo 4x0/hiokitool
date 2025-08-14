@@ -446,27 +446,14 @@ def apply_config(config):
         conn.close()
 
 
-def diag():
-    conn = TelnetClient('192.168.1.200')
-    conn.connect()
-    print(collect_current_setup(conn))
-    #
-    # system = System()
-    # system.reset.get()
-    # measure = Measure()
-    # measure.voltage_range.get()
-    # print(conn.send_query())
-    # measure.voltage_range.set('100V')
-    # measure.speed.set('FAST')
-    # print(conn.send_query())
-    # # measure.voltage_range.get()
-    # # measure.read.get()
-    # measure.continuous.set('ON')
-    # measure.voltage_range_auto.set('ON')
-    # measure.voltage_digits.set('8')
-    # measure.speed.get()
-    # print(conn.send_query())
-    conn.close()
+def diag(host='192.168.1.200', port=23, timeout=10):
+    """Diagnostic function for testing connections"""
+    conn = TelnetClient(host, port, timeout)
+    try:
+        conn.connect()
+        print(collect_current_setup(conn))
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':
