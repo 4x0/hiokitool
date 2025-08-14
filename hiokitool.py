@@ -289,106 +289,114 @@ def load_config(config_file):
     return config
 
 def apply_config(config):
-    if 'Host' in config:
-        conn = TelnetClient(
-            config.get('Host', 'host', fallback='192.168.1.200'),
-            int(config.get('Host', 'port', fallback=23)),
-            int(config.get('Host', 'timeout', fallback=10)),
-        )
-        conn.connect()
-    else:
+    if 'Host' not in config:
+        print("Error: No [Host] section in config file")
         exit(1)
+    
+    conn = TelnetClient(
+        config.get('Host', 'host', fallback='192.168.1.200'),
+        int(config.get('Host', 'port', fallback=23)),
+        int(config.get('Host', 'timeout', fallback=10)),
+    )
+    
+    try:
+        conn.connect()
+    except Exception as e:
+        print(f"Failed to connect: {e}")
+        exit(1)
+    
+    try:
+        system = System()
+        if 'System' in config:
+            if 'reset' in config['System']:
+                if config['System']['reset'].upper() == 'TRUE':
+                    system.wait.get()
+                    system.reset.get()
+                    system.wait.get()
+                    conn.send_query()
 
-    system = System()
-    if 'System' in config:
-        if 'reset' in config['System']:
-            if config['System']['reset'].upper() == 'TRUE':
-                system.wait.get()
-                system.reset.get()
-                system.wait.get()
+        if 'Display' in config:
+            display = Display()
+            if 'brightness' in config['Display']:
+                display.brightness.set(config['Display']['brightness'])
+            if 'view' in config['Display']:
+                display.view.set(config['Display']['view'])
+            if 'state' in config['Display']:
+                display.state.set(config['Display']['state'])
+            if 'type' in config['Display']:
+                display.type.set(config['Display']['type'])
+
+        conn.send_query()
+
+        measure = Measure()
+        temperature = False
+
+        if 'Measure' in config:
+            if 'voltage_range' in config['Measure']:
+                measure.voltage_range.set(config['Measure']['voltage_range'])
+            if 'voltage_range_auto' in config['Measure']:
+                measure.voltage_range_auto.set(config['Measure']['voltage_range_auto'])
+            if 'speed' in config['Measure']:
+                measure.speed.set(config['Measure']['speed'])
+            if 'sample_count' in config['Measure']:
+                measure.sample_count.set(config['Measure']['sample_count'])
+            if 'format' in config['Measure']:
+                measure.format.set(config['Measure']['format'])
+            if 'continuous' in config['Measure']:
+                measure.continuous.set(config['Measure']['continuous'])
+            if 'impedence_auto' in config['Measure']:
+                measure.impedence_auto.set(config['Measure']['impedence_auto'])
+            if 'temperature' in config['Measure']:
+                if config['Measure']['temperature'].strip().upper() == 'ON':
+                    temperature = True
+            conn.send_query()
+
+        if 'Panel' in config:
+            panel = Panel()
+            if 'load' in config['Panel']:
+                panel.load(config['Panel']['load'])
+                conn.send_query()
+            elif 'save' in config['Panel']:
+                panel.save(config['Panel']['save'])
                 conn.send_query()
 
-    if 'Display' in config:
-        display = Display()
-        if 'brightness' in config['Display']:
-            display.brightness.set(config['Display']['brightness'])
-        if 'view' in config['Display']:
-            display.view.set(config['Display']['view'])
-        if 'state' in config['Display']:
-            display.state.set(config['Display']['state'])
-        if 'type' in config['Display']:
-            display.type.set(config['Display']['type'])
-
-    conn.send_query()
-
-    measure = Measure()
-    temperature = False
-
-    if 'Measure' in config:
-        if 'voltage_range' in config['Measure']:
-            measure.voltage_range.set(config['Measure']['voltage_range'])
-        if 'voltage_range_auto' in config['Measure']:
-            measure.voltage_range_auto.set(config['Measure']['voltage_range_auto'])
-        if 'speed' in config['Measure']:
-            measure.speed.set(config['Measure']['speed'])
-        if 'sample_count' in config['Measure']:
-            measure.sample_count.set(config['Measure']['sample_count'])
-        if 'format' in config['Measure']:
-            measure.format.set(config['Measure']['format'])
-        if 'continuous' in config['Measure']:
-            measure.continuous.set(config['Measure']['continuous'])
-        if 'impedence_auto' in config['Measure']:
-            measure.impedence_auto.set(config['Measure']['impedence_auto'])
-        if 'temperature' in config['Measure']:
-            if config['Measure']['temperature'].strip().upper() == 'ON':
-                temperature = True
-        conn.send_query()
-
-    if 'Panel' in config:
-        panel = Panel()
-        if 'load' in config['Panel']:
-            panel.load(config['Panel']['load'])
-            conn.send_query()
-        elif 'save' in config['Panel']:
-            panel.save(config['Panel']['save'])
+        if 'Label' in config:
+            label = Label()
+            if 'state' in config['Label']:
+                label.label_state.set(config['Label']['state'])
+            if 'text' in config['Label']:
+                label.set_text(config['Label']['text'])
             conn.send_query()
 
-    if 'Label' in config:
-        label = Label()
-        if 'state' in config['Label']:
-            label.label_state.set(config['Label']['state'])
-        if 'text' in config['Label']:
-            label.set_text(config['Label']['text'])
-        conn.send_query()
-
-    if 'Run' in config:
-        samples = int(config['Run'].get('samples', 10))
-        rate = float(config['Run'].get('polling_rate', 1))
-        output_file = '%s_HIOKI.csv' % datetime.now().strftime('%Y%m%d_%H%M%S')
-        collected_samples = 0
-        next_timestamp = datetime.now()
-        with open(output_file, 'a') as f:
-            if 'settings_dump' in config['Run'] and config['Run'].get('settings_dump').upper() == 'TRUE':
-                current_settings = collect_current_setup(conn)
-                for k, v in current_settings.items():
-                    f.write(f'{k}={v}\n')
-            system.wait.get()
-            conn.send_query()
-            while collected_samples < samples:
-                if collected_samples == 0:
-                    _now = next_timestamp
-                else:
-                    _now = datetime.now()
-                if _now >= next_timestamp:
-                    next_timestamp += timedelta(seconds=rate)
-                    measure.read.get(sub='TEMP') if temperature else measure.read.get()
-                    result = conn.send_query()
-                    line = '%s,%s' % (_now, result)
-                    f.write(line)
-                    print(line.strip(), '(%s/%s)' % (collected_samples+1, samples))
-                    collected_samples += 1
-                sleep(0.005)
-    conn.close()
+        if 'Run' in config:
+            samples = int(config['Run'].get('samples', 10))
+            rate = float(config['Run'].get('polling_rate', 1))
+            output_file = '%s_HIOKI.csv' % datetime.now().strftime('%Y%m%d_%H%M%S')
+            collected_samples = 0
+            next_timestamp = datetime.now()
+            with open(output_file, 'a') as f:
+                if 'settings_dump' in config['Run'] and config['Run'].get('settings_dump').upper() == 'TRUE':
+                    current_settings = collect_current_setup(conn)
+                    for k, v in current_settings.items():
+                        f.write(f'{k}={v}\n')
+                system.wait.get()
+                conn.send_query()
+                while collected_samples < samples:
+                    if collected_samples == 0:
+                        _now = next_timestamp
+                    else:
+                        _now = datetime.now()
+                    if _now >= next_timestamp:
+                        next_timestamp += timedelta(seconds=rate)
+                        measure.read.get(sub='TEMP') if temperature else measure.read.get()
+                        result = conn.send_query()
+                        line = '%s,%s' % (_now, result)
+                        f.write(line)
+                        print(line.strip(), '(%s/%s)' % (collected_samples+1, samples))
+                        collected_samples += 1
+                    sleep(0.005)
+    finally:
+        conn.close()
 
 
 def diag():
