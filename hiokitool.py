@@ -94,6 +94,7 @@ class TelnetClient:
 
     def _receive_response(self, timeout):
         msgBuf = bytes()  # Received Data
+        MAX_RESPONSE_SIZE = 1024 * 1024  # 1MB max response size
         try:
             start = time.time()  # Record time for timeout
             while True:
@@ -106,12 +107,19 @@ class TelnetClient:
                     break
                 else:
                     msgBuf += rcv
+                    # Check for buffer overflow
+                    if len(msgBuf) > MAX_RESPONSE_SIZE:
+                        raise RuntimeError(f"Response exceeded maximum size of {MAX_RESPONSE_SIZE} bytes")
                 # Timeout processing
                 if time.time() - start > timeout:
                     msgBuf = "Timeout Error"
                     break
+        except UnicodeDecodeError as e:
+            raise RuntimeError(f"Failed to decode response. Invalid UTF-8 data: {e}")
         except Exception as e:
-            raise Exception(f"Failed to receive response. Error: {e}")
+            if isinstance(e, RuntimeError):
+                raise
+            raise RuntimeError(f"Failed to receive response. Error: {e}")
         return msgBuf
 
     def close(self):
