@@ -26,7 +26,7 @@ hiokitool provides a programmatic interface to HIOKI multimeters that support te
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/hiokitool.git
+git clone https://github.com/4x0/hiokitool.git
 cd hiokitool
 ```
 
