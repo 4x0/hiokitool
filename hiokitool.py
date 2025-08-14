@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 from time import sleep
 import argparse
 import re
+import os
+import signal
+import sys
 
 
 class MessageQueue:
@@ -336,6 +339,168 @@ class Panel:
         return self.save_panel.set(panel_no)
 
 
+class RestrictedAPI:
+    """Safe API for user scripts - prevents dangerous operations"""
+    
+    def __init__(self, connection, measure_obj, system_obj=None):
+        self.conn = connection
+        self.measure_obj = measure_obj
+        self.system_obj = system_obj
+        self.results = []
+        self.current_io = None
+        self.current_range = None
+        self.metadata = {}
+        
+    def set_io(self, value):
+        """Safely set IO output (0-2047)"""
+        if not isinstance(value, int):
+            try:
+                if isinstance(value, str) and value.startswith('0b'):
+                    value = int(value, 2)
+                else:
+                    value = int(value)
+            except ValueError:
+                raise ValueError(f"Invalid IO value: {value}")
+        
+        if not 0 <= value <= 2047:
+            raise ValueError(f"IO value {value} out of range (0-2047)")
+        
+        Q.put(f':IO:OUTPut {value}', False)
+        self.conn.send_query()
+        self.current_io = value
+        print(f"IO set to: {value} (0b{value:011b})")
+        return True
+    
+    def measure(self, samples=1, delay_ms=0):
+        """Take measurements and return results"""
+        if samples < 1 or samples > 5000:
+            raise ValueError(f"Sample count {samples} out of range (1-5000)")
+        
+        results = []
+        for i in range(samples):
+            self.measure_obj.read.get()
+            result_str = self.conn.send_query()
+            
+            try:
+                # Handle both single values and comma-separated (voltage,temperature)
+                if ',' in result_str:
+                    values = [float(v.strip()) for v in result_str.split(',')]
+                    results.append(values[0])  # Primary measurement
+                else:
+                    results.append(float(result_str.strip()))
+            except ValueError:
+                print(f"Warning: Could not parse measurement: {result_str}")
+                results.append(None)
+            
+            if delay_ms > 0 and i < samples - 1:
+                sleep(delay_ms / 1000.0)
+        
+        self.results.extend([r for r in results if r is not None])
+        return results
+    
+    def set_range(self, range_value):
+        """Set voltage measurement range"""
+        valid_ranges = ['100MV', '1V', '10V', '100V', '1000V', 'AUTO', 'MAX', 'MIN', 'DEFAULT']
+        
+        range_upper = str(range_value).upper()
+        if range_upper not in valid_ranges:
+            raise ValueError(f"Invalid range: {range_value}. Valid: {', '.join(valid_ranges)}")
+        
+        self.measure_obj.voltage_range.set(range_value)
+        self.conn.send_query()
+        self.current_range = range_value
+        print(f"Range set to: {range_value}")
+        return True
+    
+    def set_speed(self, speed):
+        """Set measurement speed (SLOW/MEDium/FAST)"""
+        valid_speeds = ['SLOW', 'MEDIUM', 'MED', 'FAST']
+        
+        speed_upper = str(speed).upper()
+        if speed_upper not in valid_speeds:
+            raise ValueError(f"Invalid speed: {speed}. Valid: SLOW, MEDium, FAST")
+        
+        # Normalize MEDium/MED
+        if speed_upper == 'MEDIUM':
+            speed_upper = 'MED'
+        
+        self.measure_obj.speed.set(speed_upper)
+        self.conn.send_query()
+        print(f"Speed set to: {speed_upper}")
+        return True
+    
+    def wait(self, seconds):
+        """Safe wait/delay function"""
+        if not 0 <= seconds <= 60:
+            raise ValueError(f"Wait time {seconds} out of range (0-60 seconds)")
+        sleep(seconds)
+        return True
+    
+    def get_statistics(self):
+        """Get measurement statistics"""
+        if not self.results:
+            return {
+                'mean': None,
+                'max': None,
+                'min': None,
+                'std': None,
+                'count': 0
+            }
+        
+        import statistics
+        return {
+            'mean': statistics.mean(self.results),
+            'max': max(self.results),
+            'min': min(self.results),
+            'std': statistics.stdev(self.results) if len(self.results) > 1 else 0,
+            'count': len(self.results)
+        }
+    
+    def log(self, message):
+        """Safe logging function"""
+        print(f"[Script] {message}")
+        return True
+    
+    def set_metadata(self, key, value):
+        """Store metadata about the test"""
+        self.metadata[str(key)] = value
+        return True
+    
+    def get_metadata(self, key=None):
+        """Retrieve metadata"""
+        if key is None:
+            return self.metadata.copy()
+        return self.metadata.get(str(key))
+    
+    def clear_results(self):
+        """Clear stored results"""
+        self.results = []
+        return True
+    
+    def save_results(self, filename=None):
+        """Save results to file"""
+        if not filename:
+            filename = f"script_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        # Ensure filename is safe (no path traversal)
+        filename = os.path.basename(filename)
+        if not filename.endswith('.csv'):
+            filename += '.csv'
+        
+        with open(filename, 'w') as f:
+            # Write metadata
+            for key, value in self.metadata.items():
+                f.write(f"# {key}: {value}\n")
+            
+            # Write results
+            f.write("# index,value\n")
+            for i, value in enumerate(self.results):
+                f.write(f"{i},{value}\n")
+        
+        print(f"Results saved to: {filename}")
+        return filename
+
+
 class Label:
     def __init__(self):
         self.label = Control(':SYSTem:LABel')
@@ -424,6 +589,111 @@ def validate_config_value(section, key, value, valid_values=None, value_type=Non
         raise ValueError(f"Invalid value for [{section}] {key}: {value}. Valid values: {', '.join(valid_values)}")
     
     return value
+
+
+def execute_script_with_timeout(script_file, api, timeout=300, mode='restricted'):
+    """Execute a Python script with timeout and safety controls"""
+    
+    # Create safe namespace based on mode
+    if mode == 'restricted':
+        # Minimal safe builtins
+        safe_builtins = {
+            '__builtins__': {
+                'len': len,
+                'range': range,
+                'enumerate': enumerate,
+                'zip': zip,
+                'max': max,
+                'min': min,
+                'sum': sum,
+                'abs': abs,
+                'round': round,
+                'str': str,
+                'int': int,
+                'float': float,
+                'bool': bool,
+                'list': list,
+                'dict': dict,
+                'tuple': tuple,
+                'set': set,
+                'print': print,
+                'True': True,
+                'False': False,
+                'None': None,
+            }
+        }
+    elif mode == 'trusted':
+        # Allow more builtins and some imports
+        import math
+        import statistics
+        safe_builtins = {
+            '__builtins__': __builtins__,
+            'math': math,
+            'statistics': statistics,
+        }
+    else:  # developer mode
+        safe_builtins = {'__builtins__': __builtins__}
+    
+    # Create namespace with API
+    namespace = safe_builtins.copy()
+    namespace.update({
+        'api': api,
+        'set_io': api.set_io,
+        'measure': api.measure,
+        'set_range': api.set_range,
+        'set_speed': api.set_speed,
+        'wait': api.wait,
+        'get_statistics': api.get_statistics,
+        'log': api.log,
+        'set_metadata': api.set_metadata,
+        'get_metadata': api.get_metadata,
+        'clear_results': api.clear_results,
+        'save_results': api.save_results,
+    })
+    
+    # Set up timeout handler (Unix/Linux/Mac only)
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"Script execution exceeded timeout of {timeout} seconds")
+    
+    # Read and compile script
+    if not os.path.exists(script_file):
+        raise FileNotFoundError(f"Script file not found: {script_file}")
+    
+    with open(script_file, 'r') as f:
+        script_code = f.read()
+    
+    # Set timeout alarm if on Unix-like system
+    if hasattr(signal, 'SIGALRM'):
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(timeout)
+    
+    try:
+        # Compile and execute script
+        compiled_code = compile(script_code, script_file, 'exec')
+        exec(compiled_code, namespace)
+        
+        # Look for and execute main function
+        if 'sequence' in namespace and callable(namespace['sequence']):
+            result = namespace['sequence'](api)
+            return result
+        elif 'main' in namespace and callable(namespace['main']):
+            result = namespace['main'](api)
+            return result
+        else:
+            print("Warning: No 'sequence' or 'main' function found in script")
+            return api.results
+            
+    except TimeoutError:
+        print(f"Script execution timeout after {timeout} seconds")
+        raise
+    except Exception as e:
+        print(f"Script execution error: {e}")
+        raise
+    finally:
+        # Cancel timeout alarm
+        if hasattr(signal, 'SIGALRM'):
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
 
 def load_config(config_file):
     config = configparser.ConfigParser()
@@ -582,6 +852,39 @@ def apply_config(config):
                     conn.send_query()
                 else:
                     raise ValueError(f"IO output value {output_value} out of range (0-2047)")
+
+        # Check for script execution
+        if 'Script' in config and config['Script'].get('enabled', 'false').upper() == 'TRUE':
+            script_file = config['Script'].get('file')
+            if script_file and os.path.exists(script_file):
+                print(f"Executing script: {script_file}")
+                
+                # Get script parameters
+                mode = config['Script'].get('mode', 'restricted').lower()
+                timeout = int(config['Script'].get('timeout', '300'))
+                
+                # Create API instance
+                api = RestrictedAPI(conn, measure, system)
+                
+                try:
+                    # Execute script
+                    results = execute_script_with_timeout(script_file, api, timeout, mode)
+                    print(f"Script completed. {len(api.results)} measurements collected.")
+                    
+                    # Save results if requested
+                    if config['Script'].get('save_results', 'true').upper() == 'TRUE':
+                        output_file = api.save_results()
+                        print(f"Script results saved to: {output_file}")
+                    
+                except TimeoutError as e:
+                    print(f"Script timeout: {e}")
+                except Exception as e:
+                    print(f"Script error: {e}")
+                
+                # Script execution replaces normal Run mode
+                return
+            else:
+                print(f"Warning: Script file not found: {script_file}")
 
         if 'Run' in config:
             samples = int(config['Run'].get('samples', 10))

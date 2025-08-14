@@ -19,6 +19,7 @@ hiokitool provides a programmatic interface to HIOKI multimeters that support te
 - **Digital I/O Control**: Control up to 11 digital outputs for relay switching and automation
 - **IO Sequencing**: Automatically cycle through IO patterns during measurements
 - **External Triggering**: Support for external, bus, or immediate triggering modes
+- **Python Scripting**: Execute complex test sequences with conditional logic and calculations
 
 ## Requirements
 
@@ -265,6 +266,112 @@ Common use cases:
 - **Range switching**: Control external attenuators or amplifiers
 - **Safety interlocks**: Ensure safe conditions before measurement
 - **Status indication**: Drive LEDs or alarms based on configuration
+
+## Python Scripting
+
+hiokitool supports Python scripts for complex test sequences with conditional logic:
+
+### Script Configuration
+
+```ini
+[Script]
+enabled = true              ; Enable script execution
+file = test_sequence.py     ; Script file path
+mode = restricted           ; Safety mode (see below)
+timeout = 300              ; Maximum runtime in seconds
+save_results = true        ; Auto-save results to CSV
+```
+
+### Safety Modes
+
+- **restricted**: Safe subset of Python, no file/network access (default)
+- **trusted**: Additional math/statistics modules, relaxed restrictions
+- **developer**: Full Python access (use with caution)
+
+### Script API
+
+Scripts have access to a safe API for instrument control:
+
+```python
+def sequence(api):
+    """Main function called by hiokitool"""
+    
+    # IO Control
+    api.set_io(0b00000001)     # Set digital outputs
+    
+    # Measurement Configuration
+    api.set_range('10V')        # Set voltage range
+    api.set_speed('FAST')       # Set measurement speed
+    
+    # Take Measurements
+    results = api.measure(10, delay_ms=100)  # 10 samples, 100ms delay
+    
+    # Process Results
+    stats = api.get_statistics()
+    api.log(f"Mean: {stats['mean']:.3f}V")
+    
+    # Conditional Logic
+    if stats['max'] > 9.0:
+        api.set_range('100V')
+        results = api.measure(5)
+    
+    # Save Results
+    api.save_results('test_data.csv')
+    
+    return api.results
+```
+
+### Available API Functions
+
+- `set_io(value)`: Set digital output (0-2047)
+- `measure(samples, delay_ms)`: Take measurements
+- `set_range(range)`: Set voltage range (100mV/1V/10V/100V/1000V/AUTO)
+- `set_speed(speed)`: Set speed (SLOW/MEDium/FAST)
+- `wait(seconds)`: Delay execution (max 60s)
+- `get_statistics()`: Get mean, max, min, std of measurements
+- `log(message)`: Print message to console
+- `set_metadata(key, value)`: Store test metadata
+- `save_results(filename)`: Save measurements to CSV
+
+### Example: Conditional Range Selection
+
+```python
+def sequence(api):
+    """Auto-ranging measurement"""
+    
+    ranges = ['1V', '10V', '100V', '1000V']
+    
+    for range_setting in ranges:
+        api.set_range(range_setting)
+        api.wait(0.5)  # Settling time
+        
+        # Test measurement
+        test = api.measure(3, delay_ms=50)
+        avg = sum(test) / len(test)
+        
+        # Check if in good range (10-90% of full scale)
+        range_val = float(range_setting.replace('V', ''))
+        if 0.1 * range_val < avg < 0.9 * range_val:
+            api.log(f"Optimal range found: {range_setting}")
+            break
+        elif avg < 0.1 * range_val and range_setting != '1V':
+            api.log(f"Signal too low for {range_setting}, trying lower")
+            continue
+        elif avg > 0.9 * range_val and range_setting != '1000V':
+            api.log(f"Signal too high for {range_setting}, trying higher")
+            continue
+    
+    # Take actual measurements
+    final_results = api.measure(100, delay_ms=100)
+    api.save_results()
+    
+    return final_results
+```
+
+### Example Scripts Included
+
+- **test_sequence.py**: Multi-range characterization with over-range detection
+- **simple_sweep.py**: IO sweep from 0-7 with measurements at each step
 
 ## Output Format
 
