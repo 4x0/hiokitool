@@ -415,6 +415,50 @@ def apply_config(config):
                 label.set_text(config['Label']['text'])
             conn.send_query()
 
+        if 'IO' in config:
+            io = ExternalIO()
+            
+            # Set mode if specified
+            if 'mode' in config['IO']:
+                mode_value = config['IO']['mode'].upper()
+                if mode_value in ['INPUT', 'OUTPUT', 'TRIGGER']:
+                    # Note: mode might be read-only on some models
+                    pass  # io.mode query only, cannot set
+            
+            # Handle different output formats
+            output_value = None
+            
+            # Option 1: Binary string
+            if 'output_binary' in config['IO']:
+                try:
+                    output_value = int(config['IO']['output_binary'], 2)
+                except ValueError:
+                    raise ValueError(f"Invalid binary value for IO output: {config['IO']['output_binary']}")
+            
+            # Option 2: Decimal
+            elif 'output_decimal' in config['IO']:
+                try:
+                    output_value = int(config['IO']['output_decimal'])
+                except ValueError:
+                    raise ValueError(f"Invalid decimal value for IO output: {config['IO']['output_decimal']}")
+            
+            # Option 3: Individual bits
+            elif any(f'bit_{i}' in config['IO'] for i in range(11)):
+                output_value = 0
+                for i in range(11):
+                    bit_key = f'bit_{i}'
+                    if bit_key in config['IO']:
+                        if config['IO'][bit_key].upper() in ['ON', '1', 'TRUE']:
+                            output_value |= (1 << i)
+            
+            # Apply output value if specified
+            if output_value is not None:
+                if 0 <= output_value <= 2047:
+                    Q.put(f':IO:OUTPut {output_value}', False)
+                    conn.send_query()
+                else:
+                    raise ValueError(f"IO output value {output_value} out of range (0-2047)")
+
         if 'Run' in config:
             samples = int(config['Run'].get('samples', 10))
             rate = float(config['Run'].get('polling_rate', 1))

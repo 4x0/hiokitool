@@ -70,6 +70,29 @@ temperature = ON             ; Include temperature measurements
 state = ON                   ; Enable custom label
 text = %%H%%M TEST          ; Label text (supports strftime formatting)
 
+[IO]
+; Digital I/O configuration for relay control and external triggers
+; Choose ONE of the following output formats:
+
+; Option 1: Binary representation (clearest for bit patterns)
+; output_binary = 0b00000001101  ; Bits 0, 2, 3 active
+
+; Option 2: Decimal value
+; output_decimal = 13  ; Same as above (decimal equivalent)
+
+; Option 3: Individual bit control (most readable)
+; bit_0 = ON   ; Relay 1 - Input channel A
+; bit_1 = OFF  ; Relay 2 - Input channel B  
+; bit_2 = ON   ; Relay 3 - Range 10V
+; bit_3 = ON   ; Relay 4 - Range 100V
+; bit_4 = OFF  ; Relay 5 - Filter
+; bit_5 = OFF  ; Relay 6 - Shunt resistor
+; bit_6 = OFF  ; Trigger output
+; bit_7 = OFF  ; Status LED 1
+; bit_8 = OFF  ; Status LED 2
+; bit_9 = OFF  ; Status LED 3
+; bit_10 = OFF ; Interlock signal
+
 [Run]
 settings_dump = False        ; Dump current settings to CSV header
 samples = 100                ; Number of samples to collect
@@ -139,6 +162,32 @@ voltage_range = 100V
 samples = 8640        ; 24 hours at 10-second intervals
 polling_rate = 10
 ```
+
+### Example: Digital I/O for Relay Control
+
+Control external relays for automated test switching:
+
+```ini
+[IO]
+; Example 1: Binary pattern for test configuration
+output_binary = 0b00010001  ; Activate relays on bits 0 and 4
+
+; Example 2: Individual bit control for clear documentation
+bit_0 = ON   ; Connect test probe to channel A
+bit_1 = OFF  ; Disconnect channel B
+bit_2 = ON   ; Select 10V range
+bit_3 = OFF  ; Deselect 100V range
+bit_4 = ON   ; Enable input filter
+
+; Example 3: Simple decimal value
+output_decimal = 7  ; Activate first three relays (bits 0,1,2)
+```
+
+Common use cases:
+- **Automated multiplexing**: Switch between multiple test points
+- **Range switching**: Control external attenuators or amplifiers
+- **Safety interlocks**: Ensure safe conditions before measurement
+- **Status indication**: Drive LEDs or alarms based on configuration
 
 ## Output Format
 
