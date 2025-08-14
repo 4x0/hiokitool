@@ -48,23 +48,33 @@ class TelnetClient:
             self.sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
             self.sock.settimeout(self.timeout)
             self.sock.connect((self.host, self.port))
+        except socket.timeout:
+            raise ConnectionError(f"Connection timeout to {self.host}:{self.port} after {self.timeout} seconds")
+        except socket.gaierror as e:
+            raise ConnectionError(f"Failed to resolve host {self.host}: {e}")
+        except ConnectionRefusedError:
+            raise ConnectionError(f"Connection refused by {self.host}:{self.port}. Check if instrument is powered on and network settings are correct")
         except Exception as e:
-            raise Exception(f"Failed to connect to {self.host}:{self.port}. Error: {e}")
+            raise ConnectionError(f"Failed to connect to {self.host}:{self.port}. Error: {e}")
 
     def send_command(self, command):
         if self.sock is None:
-            raise Exception("Not connected to any server.")
+            raise RuntimeError("Not connected to any server.")
         try:
             command = command + '\r\n'  # Add a terminator, CR+LF, to transmitted command
             self.sock.send(bytes(command, 'utf-8'))  # Convert to byte type and send
             response = self._receive_response(self.timeout)
             return response
+        except socket.timeout:
+            raise TimeoutError(f"Timeout waiting for response to command: {command.strip()}")
+        except BrokenPipeError:
+            raise ConnectionError("Connection lost while sending command")
         except Exception as e:
-            raise Exception(f"Failed to send command. Error: {e}")
+            raise RuntimeError(f"Failed to send command '{command.strip()}'. Error: {e}")
 
     def send_query(self):
         if self.sock is None:
-            raise Exception("Not connected to any server.")
+            raise RuntimeError("Not connected to any server.")
         try:
             command = Q.get() + '\r\n'  # Add a terminator, CR+LF, to transmitted command
             print(command.strip())
@@ -75,8 +85,12 @@ class TelnetClient:
                 response = True
             Q.clear()
             return response
+        except socket.timeout:
+            raise TimeoutError(f"Timeout waiting for response to query: {command.strip()}")
+        except BrokenPipeError:
+            raise ConnectionError("Connection lost while sending query")
         except Exception as e:
-            raise Exception(f"Failed to send command. Error: {e}")
+            raise RuntimeError(f"Failed to send query. Error: {e}")
 
     def _receive_response(self, timeout):
         msgBuf = bytes()  # Received Data
