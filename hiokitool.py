@@ -222,6 +222,110 @@ class ExternalIO:
         self.output = ControlSetting(':IO:OUTPut')  # <Output data 0 to 2047>
 
 
+class IOSequencer:
+    """Handles sequential IO output patterns during measurements"""
+    def __init__(self, config):
+        self.enabled = False
+        self.mode = 'range'  # 'range' or 'list'
+        self.patterns = []
+        self.current_index = 0
+        self.samples_per_step = 1
+        self.samples_at_current = 0
+        self.loop = False
+        self.include_in_csv = False
+        
+        if 'IO.Sequence' not in config:
+            return
+            
+        seq_config = config['IO.Sequence']
+        self.enabled = seq_config.get('enabled', 'false').upper() == 'TRUE'
+        
+        if not self.enabled:
+            return
+            
+        self.mode = seq_config.get('mode', 'range').lower()
+        self.samples_per_step = int(seq_config.get('samples_per_step', '1'))
+        self.loop = seq_config.get('loop', 'true').upper() == 'TRUE'
+        self.include_in_csv = seq_config.get('include_io_in_csv', 'true').upper() == 'TRUE'
+        
+        if self.mode == 'range':
+            start = int(seq_config.get('start', '0'))
+            end = int(seq_config.get('end', '7'))
+            step = int(seq_config.get('step', '1'))
+            
+            # Validate range
+            if start < 0 or start > 2047:
+                raise ValueError(f"IO sequence start value {start} out of range (0-2047)")
+            if end < 0 or end > 2047:
+                raise ValueError(f"IO sequence end value {end} out of range (0-2047)")
+            
+            # Generate pattern list from range
+            if step > 0:
+                self.patterns = list(range(start, end + 1, step))
+            else:
+                raise ValueError("IO sequence step must be positive")
+                
+        elif self.mode == 'list':
+            # Parse comma-separated list of patterns
+            pattern_str = seq_config.get('patterns', '0')
+            self.patterns = []
+            for p in pattern_str.split(','):
+                p = p.strip()
+                if p.startswith('0b'):
+                    value = int(p, 2)
+                else:
+                    value = int(p)
+                if 0 <= value <= 2047:
+                    self.patterns.append(value)
+                else:
+                    raise ValueError(f"IO pattern value {value} out of range (0-2047)")
+        
+        if not self.patterns:
+            self.patterns = [0]  # Default to single pattern
+    
+    def should_change(self):
+        """Check if it's time to change IO output"""
+        if not self.enabled or not self.patterns:
+            return False
+        return self.samples_at_current >= self.samples_per_step
+    
+    def next(self):
+        """Move to next IO pattern"""
+        if not self.enabled:
+            return None
+            
+        self.samples_at_current = 0
+        self.current_index += 1
+        
+        if self.current_index >= len(self.patterns):
+            if self.loop:
+                self.current_index = 0
+            else:
+                self.enabled = False  # Disable after one complete cycle
+                return None
+                
+        return self.get_current()
+    
+    def get_current(self):
+        """Get current IO output value"""
+        if not self.enabled or not self.patterns:
+            return None
+        if self.current_index < len(self.patterns):
+            return self.patterns[self.current_index]
+        return None
+    
+    def increment_sample(self):
+        """Increment sample counter for current IO state"""
+        if self.enabled:
+            self.samples_at_current += 1
+    
+    def is_complete(self):
+        """Check if sequence is complete (for non-looping mode)"""
+        if not self.enabled or self.loop:
+            return False
+        return self.current_index >= len(self.patterns)
+
+
 class Panel:
     def __init__(self):
         self.save_panel = Control('*SAV')
@@ -378,6 +482,26 @@ def apply_config(config):
         measure = Measure()
         temperature = False
 
+        # Configure trigger if specified
+        if 'Trigger' in config:
+            trigger_source = config['Trigger'].get('source', 'IMMediate').upper()
+            if trigger_source in ['IMMEDIATE', 'EXTERNAL', 'BUS']:
+                measure.trigger_source.set(trigger_source)
+            
+            if 'delay' in config['Trigger']:
+                delay = float(config['Trigger']['delay'])
+                if 0 <= delay <= 9.999:
+                    measure.trigger_delay.set(delay)
+                else:
+                    raise ValueError(f"Trigger delay {delay} out of range (0-9.999 seconds)")
+            
+            if 'delay_auto' in config['Trigger']:
+                auto = config['Trigger']['delay_auto'].upper()
+                if auto in ['ON', 'OFF', '1', '0']:
+                    measure.trigger_delay_auto.set(auto)
+            
+            conn.send_query()
+
         if 'Measure' in config:
             if 'voltage_range' in config['Measure']:
                 measure.voltage_range.set(config['Measure']['voltage_range'])
@@ -465,14 +589,43 @@ def apply_config(config):
             output_file = '%s_HIOKI.csv' % datetime.now().strftime('%Y%m%d_%H%M%S')
             collected_samples = 0
             next_timestamp = datetime.now()
+            
+            # Initialize IO sequencer
+            io_sequencer = IOSequencer(config)
+            
+            # Set initial IO state if sequencer is enabled
+            if io_sequencer.enabled and io_sequencer.get_current() is not None:
+                Q.put(f':IO:OUTPut {io_sequencer.get_current()}', False)
+                conn.send_query()
+                print(f"IO sequence started, initial output: {io_sequencer.get_current()}")
+            
             with open(output_file, 'a') as f:
                 if 'settings_dump' in config['Run'] and config['Run'].get('settings_dump').upper() == 'TRUE':
                     current_settings = collect_current_setup(conn)
                     for k, v in current_settings.items():
                         f.write(f'{k}={v}\n')
+                
+                # Write CSV header if IO state is included
+                if io_sequencer.enabled and io_sequencer.include_in_csv:
+                    header = '# timestamp, measurement, io_state\n' if not temperature else '# timestamp, voltage, temperature, io_state\n'
+                    f.write(header)
+                
                 system.wait.get()
                 conn.send_query()
+                
                 while collected_samples < samples:
+                    # Check if IO needs to change
+                    if io_sequencer.enabled and io_sequencer.should_change():
+                        next_io = io_sequencer.next()
+                        if next_io is not None:
+                            Q.put(f':IO:OUTPut {next_io}', False)
+                            conn.send_query()
+                            print(f"IO output changed to: {next_io}")
+                        elif io_sequencer.is_complete():
+                            print("IO sequence complete")
+                            if not io_sequencer.loop:
+                                break  # Stop if sequence is complete and not looping
+                    
                     if collected_samples == 0:
                         _now = next_timestamp
                     else:
@@ -481,10 +634,25 @@ def apply_config(config):
                         next_timestamp += timedelta(seconds=rate)
                         measure.read.get(sub='TEMP') if temperature else measure.read.get()
                         result = conn.send_query()
-                        line = '%s,%s' % (_now, result)
+                        
+                        # Format output line with optional IO state
+                        if io_sequencer.enabled and io_sequencer.include_in_csv:
+                            current_io = io_sequencer.get_current()
+                            line = '%s,%s,%s' % (_now, result, current_io if current_io is not None else 'N/A')
+                        else:
+                            line = '%s,%s' % (_now, result)
+                        
                         f.write(line)
-                        print(line.strip(), '(%s/%s)' % (collected_samples+1, samples))
+                        
+                        # Print progress with IO state if enabled
+                        if io_sequencer.enabled:
+                            io_info = f" IO:{io_sequencer.get_current()}" if io_sequencer.get_current() is not None else ""
+                            print(line.strip(), '(%s/%s)%s' % (collected_samples+1, samples, io_info))
+                        else:
+                            print(line.strip(), '(%s/%s)' % (collected_samples+1, samples))
+                        
                         collected_samples += 1
+                        io_sequencer.increment_sample()
                     sleep(0.005)
     finally:
         conn.close()

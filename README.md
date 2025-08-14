@@ -16,6 +16,9 @@ hiokitool provides a programmatic interface to HIOKI multimeters that support te
 - **Batch Command Execution**: Efficient command queuing to minimize network overhead
 - **Panel Management**: Save and recall instrument panel configurations
 - **Custom Display Labels**: Set custom labels with datetime formatting support
+- **Digital I/O Control**: Control up to 11 digital outputs for relay switching and automation
+- **IO Sequencing**: Automatically cycle through IO patterns during measurements
+- **External Triggering**: Support for external, bus, or immediate triggering modes
 
 ## Requirements
 
@@ -70,6 +73,11 @@ temperature = ON             ; Include temperature measurements
 state = ON                   ; Enable custom label
 text = %%H%%M TEST          ; Label text (supports strftime formatting)
 
+[Trigger]
+source = IMMediate           ; Trigger source (IMMediate/EXTernal/BUS)
+delay = 0.0                  ; Delay after trigger in seconds (0-9.999)
+delay_auto = OFF             ; Auto delay calculation (ON/OFF)
+
 [IO]
 ; Digital I/O configuration for relay control and external triggers
 ; Choose ONE of the following output formats:
@@ -92,6 +100,24 @@ text = %%H%%M TEST          ; Label text (supports strftime formatting)
 ; bit_8 = OFF  ; Status LED 2
 ; bit_9 = OFF  ; Status LED 3
 ; bit_10 = OFF ; Interlock signal
+
+[IO.Sequence]
+; Automated IO pattern sequencing during measurements
+enabled = false              ; Enable IO sequencing (true/false)
+mode = range                 ; Sequence mode (range/list)
+
+; For range mode:
+start = 0                    ; Starting IO value
+end = 7                      ; Ending IO value  
+step = 1                     ; Step size
+samples_per_step = 10        ; Measurements per IO state
+loop = true                  ; Loop back to start when complete
+
+; For list mode (alternative to range):
+; patterns = 0, 1, 3, 7, 15, 31, 63, 127, 255  ; Comma-separated values
+; patterns = 0b001, 0b010, 0b100, 0b111         ; Or binary notation
+
+include_io_in_csv = true     ; Add IO state column to output file
 
 [Run]
 settings_dump = False        ; Dump current settings to CSV header
@@ -161,6 +187,57 @@ voltage_range = 100V
 [Run]
 samples = 8640        ; 24 hours at 10-second intervals
 polling_rate = 10
+```
+
+### Example: External Triggering
+
+Synchronize measurements with external events:
+
+```ini
+[Trigger]
+source = EXTernal    ; Wait for external trigger
+delay = 0.1          ; 100ms delay after trigger
+delay_auto = OFF
+
+[Run]
+samples = 100
+polling_rate = 1
+```
+
+### Example: IO Sequencing - Range Mode
+
+Automatically cycle through test configurations:
+
+```ini
+[IO.Sequence]
+enabled = true
+mode = range
+start = 0            ; Binary: 000
+end = 7              ; Binary: 111
+step = 1
+samples_per_step = 5 ; 5 measurements per configuration
+loop = true          ; Continuous cycling
+
+[Run]
+samples = 80         ; Total samples (8 states × 5 samples × 2 loops)
+polling_rate = 1
+```
+
+### Example: IO Sequencing - List Mode
+
+Test specific configurations in a custom order:
+
+```ini
+[IO.Sequence]
+enabled = true
+mode = list
+patterns = 0b001, 0b010, 0b100, 0b111  ; Test specific bit combinations
+samples_per_step = 10
+loop = false         ; Single pass through list
+
+[Run]
+samples = 40         ; 4 patterns × 10 samples each
+polling_rate = 0.5
 ```
 
 ### Example: Digital I/O for Relay Control
