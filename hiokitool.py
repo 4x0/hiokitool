@@ -297,6 +297,22 @@ def collect_current_setup(conn):
 
     return data
 
+def validate_config_value(section, key, value, valid_values=None, value_type=None):
+    """Validate configuration values"""
+    if value_type:
+        try:
+            if value_type == int:
+                return int(value)
+            elif value_type == float:
+                return float(value)
+        except ValueError:
+            raise ValueError(f"Invalid {value_type.__name__} value for [{section}] {key}: {value}")
+    
+    if valid_values and value.upper() not in [v.upper() for v in valid_values]:
+        raise ValueError(f"Invalid value for [{section}] {key}: {value}. Valid values: {', '.join(valid_values)}")
+    
+    return value
+
 def load_config(config_file):
     config = configparser.ConfigParser()
     config.read(config_file)
@@ -307,11 +323,20 @@ def apply_config(config):
         print("Error: No [Host] section in config file")
         exit(1)
     
-    conn = TelnetClient(
-        config.get('Host', 'host', fallback='192.168.1.200'),
-        int(config.get('Host', 'port', fallback=23)),
-        int(config.get('Host', 'timeout', fallback=10)),
-    )
+    host = config.get('Host', 'host', fallback='192.168.1.200')
+    port = validate_config_value('Host', 'port', 
+                                  config.get('Host', 'port', fallback='23'),
+                                  value_type=int)
+    timeout = validate_config_value('Host', 'timeout',
+                                     config.get('Host', 'timeout', fallback='10'),
+                                     value_type=int)
+    
+    if port < 1 or port > 65535:
+        raise ValueError(f"Invalid port number: {port}. Must be between 1 and 65535")
+    if timeout < 1 or timeout > 300:
+        raise ValueError(f"Invalid timeout: {timeout}. Must be between 1 and 300 seconds")
+    
+    conn = TelnetClient(host, port, timeout)
     
     try:
         conn.connect()
