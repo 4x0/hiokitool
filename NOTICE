@@ -1,0 +1,61 @@
+NOTICE
+======
+
+hiokitool - HIOKI Digital Multimeter Control Software
+Copyright (c) 2024 4x0
+
+TRADEMARK NOTICE
+----------------
+HIOKI is a registered trademark of HIOKI E.E. Corporation.
+This software is not affiliated with, endorsed by, or supported by HIOKI E.E. Corporation.
+All product and company names are trademarks or registered trademarks of their respective holders.
+
+DISCLAIMER
+----------
+This is an independent, unofficial tool created for interoperability with HIOKI measurement instruments.
+The authors of this software are not responsible for any damage, data loss, or injury that may result from its use.
+
+SAFETY WARNING
+--------------
+When using this software for automated measurements:
+
+1. ELECTRICAL SAFETY:
+   - Always follow proper electrical safety procedures
+   - Ensure measurements are within the instrument's rated specifications
+   - Never exceed the maximum input ratings of your instrument
+   - Use appropriate safety equipment and procedures for high voltage measurements
+
+2. AUTOMATED OPERATION:
+   - This software enables unattended operation of measurement equipment
+   - Always verify that automated measurements will not create hazardous conditions
+   - Implement appropriate safety interlocks and monitoring as required
+   - Do not rely solely on software for safety-critical measurements
+
+3. DATA INTEGRITY:
+   - This software is provided WITHOUT WARRANTY
+   - Always validate critical measurements independently
+   - Implement appropriate data validation and error checking for your application
+   - Network interruptions or software errors may result in data loss
+
+4. REGULATORY COMPLIANCE:
+   - Users are responsible for ensuring compliance with all applicable regulations
+   - This includes but is not limited to electrical safety, EMC, and calibration requirements
+   - The software does not guarantee measurement accuracy or calibration status
+
+USE AT YOUR OWN RISK
+--------------------
+By using this software, you acknowledge that:
+- You understand and accept all risks associated with automated instrument control
+- You will implement appropriate safety measures for your specific application
+- You will not hold the authors liable for any damages resulting from use of this software
+
+For official HIOKI software and support, please visit: https://www.hioki.com
+
+ATTRIBUTION
+-----------
+This project uses only the Python standard library and requires no third-party dependencies.
+
+LICENSE
+-------
+This software is licensed under the MIT License.
+See the LICENSE file for full license terms.
